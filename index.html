@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Personal Ordering System PRO</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { font-family: Arial; max-width:650px; margin:auto; padding:15px;}
+input, select, button { width:100%; padding:10px; margin:5px 0;}
+button { background:#2c7be5; color:white; border:none; border-radius:5px;}
+.card { border:1px solid #ddd; padding:10px; margin-bottom:10px; border-radius:6px;}
+.hidden { display:none;}
+.flex { display:flex; gap:5px;}
+.small-btn { width:auto; padding:5px 10px; margin-top:5px; background:#28a745;}
+.delete-btn { background:#dc3545;}
+</style>
+</head>
+<body>
+
+<h2>Personal Ordering System PRO</h2>
+
+<div class="flex">
+<button onclick="showTab('stock')">Stock</button>
+<button onclick="showTab('orders')">Orders</button>
+</div>
+
+<div id="stock">
+
+<h3>Add / Update Stock</h3>
+<input id="itemName" placeholder="Item Name">
+<input type="number" id="itemQty" placeholder="Quantity">
+<input type="number" id="itemPrice" placeholder="Price (RM)">
+<button onclick="addStock()">Save Stock</button>
+
+<h3>Current Stock</h3>
+<div id="stockList"></div>
+
+<h3>Create Order</h3>
+<input id="customer" placeholder="Customer Name">
+<select id="orderItem"></select>
+<input type="number" id="orderQty" placeholder="Quantity">
+<button onclick="addToCart()">Add Item</button>
+
+<div id="cart"></div>
+
+<select id="payment">
+<option>Paid</option>
+<option>Unpaid</option>
+</select>
+
+<button onclick="submitOrder()">Submit Order</button>
+
+</div>
+
+<div id="orders" class="hidden">
+<h3>Orders</h3>
+<div id="orderList"></div>
+
+<h3>Total Paid Revenue</h3>
+<div id="totalRevenue"></div>
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { 
+getFirestore, collection, addDoc, doc, updateDoc, 
+onSnapshot, getDocs, query, where, deleteDoc,
+runTransaction
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyASU5pOnnFL-LrltouQiw5swlUFvqLsa7c",
+  authDomain: "order-kuih-raya.firebaseapp.com",
+  projectId: "order-kuih-raya",
+  storageBucket: "order-kuih-raya.firebasestorage.app",
+  messagingSenderId: "158401610821",
+  appId: "1:158401610821:web:34b094d400e947ec350f2c"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+let cartItems = [];
+
+function showTab(tab){
+document.getElementById("stock").classList.add("hidden");
+document.getElementById("orders").classList.add("hidden");
+document.getElementById(tab).classList.remove("hidden");
+}
+window.showTab = showTab;
+
+// 🔹 ADD STOCK
+window.addStock = async function(){
+let name = itemName.value.trim();
+let qty = parseInt(itemQty.value);
+let price = parseFloat(itemPrice.value);
+if(!name || isNaN(qty) || isNaN(price)) return alert("Fill all");
+
+await addDoc(collection(db,"stock"),{ name, qty, price });
+};
+
+// 🔹 REALTIME STOCK DISPLAY
+onSnapshot(collection(db,"stock"),(snapshot)=>{
+stockList.innerHTML="";
+orderItem.innerHTML="";
+snapshot.forEach(d=>{
+let data = d.data();
+stockList.innerHTML += `
+<div class="card">
+<strong>${data.name}</strong><br>
+Qty: ${data.qty}<br>
+Price: RM ${data.price}
+</div>`;
+orderItem.innerHTML += `<option value="${d.id}|${data.name}|${data.price}">${data.name}</option>`;
+});
+});
+
+// 🔹 ADD TO CART
+window.addToCart = function(){
+let selected = orderItem.value.split("|");
+let id = selected[0];
+let name = selected[1];
+let price = parseFloat(selected[2]);
+let qty = parseInt(orderQty.value);
+if(isNaN(qty)) return alert("Enter quantity");
+
+cartItems.push({id,name,price,qty});
+renderCart();
+};
+
+function renderCart(){
+cart.innerHTML="";
+let total=0;
+cartItems.forEach((item,index)=>{
+let itemTotal = item.price * item.qty;
+total += itemTotal;
+cart.innerHTML += `
+<div class="card">
+${item.name} | Qty: ${item.qty} | RM ${itemTotal}
+<button class="delete-btn small-btn" onclick="removeCart(${index})">X</button>
+</div>`;
+});
+cart.innerHTML += `<strong>Total: RM ${total}</strong>`;
+}
+
+window.removeCart = function(index){
+cartItems.splice(index,1);
+renderCart();
+};
+
+// 🔹 SUBMIT ORDER (TRANSACTION SAFE)
+window.submitOrder = async function(){
+
+let customerName = customer.value.trim();
+let paymentStatus = payment.value;
+
+if(!customerName || cartItems.length===0)
+return alert("Add items first");
+
+await runTransaction(db, async (transaction)=>{
+
+let total = 0;
+
+for(let item of cartItems){
+let stockRef = doc(db,"stock",item.id);
+let stockDoc = await transaction.get(stockRef);
+
+if(!stockDoc.exists()) throw "Item not found";
+
+let stockData = stockDoc.data();
+
+if(stockData.qty < item.qty)
+throw "Not enough stock for " + item.name;
+
+transaction.update(stockRef,{
+qty: stockData.qty - item.qty
+});
+
+total += item.price * item.qty;
+}
+
+await addDoc(collection(db,"orders"),{
+customer: customerName,
+items: cartItems,
+total,
+payment: paymentStatus,
+date: new Date()
+});
+
+});
+
+cartItems = [];
+renderCart();
+alert("Order Submitted");
+};
+
+// 🔹 REALTIME ORDERS
+onSnapshot(collection(db,"orders"),(snapshot)=>{
+orderList.innerHTML="";
+let totalRevenue=0;
+
+snapshot.forEach(d=>{
+let data = d.data();
+if(data.payment==="Paid") totalRevenue+=data.total;
+
+let itemList="";
+data.items.forEach(i=>{
+itemList+=`${i.name} (x${i.qty})<br>`;
+});
+
+orderList.innerHTML+=`
+<div class="card">
+<strong>${data.customer}</strong><br>
+${itemList}
+Total: RM ${data.total}<br>
+Status: ${data.payment}<br>
+<button class="small-btn" onclick="togglePayment('${d.id}','${data.payment}')">Toggle Payment</button>
+<button class="delete-btn small-btn" onclick="deleteOrder('${d.id}')">Delete</button>
+</div>`;
+});
+
+totalRevenue.innerHTML="RM "+totalRevenue.toFixed(2);
+});
+
+// 🔹 TOGGLE PAYMENT
+window.togglePayment = async function(id,status){
+let newStatus = status==="Paid"?"Unpaid":"Paid";
+await updateDoc(doc(db,"orders",id),{ payment:newStatus });
+};
+
+// 🔹 DELETE ORDER + RESTORE STOCK
+window.deleteOrder = async function(id){
+
+let orderDoc = await getDocs(query(collection(db,"orders")));
+let target;
+
+orderDoc.forEach(d=>{
+if(d.id===id) target=d;
+});
+
+if(!target) return;
+
+let data = target.data();
+
+await runTransaction(db, async(transaction)=>{
+
+for(let item of data.items){
+let stockRef = doc(db,"stock",item.id);
+let stockDoc = await transaction.get(stockRef);
+let stockData = stockDoc.data();
+
+transaction.update(stockRef,{
+qty: stockData.qty + item.qty
+});
+}
+
+transaction.delete(doc(db,"orders",id));
+
+});
+
+};
+
+</script>
+</body>
+</html>
