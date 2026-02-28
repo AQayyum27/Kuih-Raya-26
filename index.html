@@ -25,7 +25,7 @@ button { background:#2c7be5; color:white; border:none; border-radius:5px;}
 
 <div id="stock">
 
-<h3>Add / Update Stock</h3>
+<h3>Add Stock</h3>
 <input id="itemName" placeholder="Item Name">
 <input type="number" id="itemQty" placeholder="Quantity">
 <input type="number" id="itemPrice" placeholder="Price (RM)">
@@ -64,17 +64,16 @@ button { background:#2c7be5; color:white; border:none; border-radius:5px;}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { 
 getFirestore, collection, addDoc, doc, updateDoc, 
-onSnapshot, getDocs, query, where, deleteDoc,
-runTransaction
+onSnapshot, deleteDoc, runTransaction 
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyASU5pOnnFL-LrltouQiw5swlUFvqLsa7c",
-  authDomain: "order-kuih-raya.firebaseapp.com",
-  projectId: "order-kuih-raya",
-  storageBucket: "order-kuih-raya.firebasestorage.app",
-  messagingSenderId: "158401610821",
-  appId: "1:158401610821:web:34b094d400e947ec350f2c"
+  apiKey: "PASTE_YOURS",
+  authDomain: "PASTE_YOURS",
+  projectId: "PASTE_YOURS",
+  storageBucket: "PASTE_YOURS",
+  messagingSenderId: "PASTE_YOURS",
+  appId: "PASTE_YOURS"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -89,31 +88,45 @@ document.getElementById(tab).classList.remove("hidden");
 }
 window.showTab = showTab;
 
+
 // 🔹 ADD STOCK
 window.addStock = async function(){
 let name = itemName.value.trim();
 let qty = parseInt(itemQty.value);
 let price = parseFloat(itemPrice.value);
+
 if(!name || isNaN(qty) || isNaN(price)) return alert("Fill all");
 
 await addDoc(collection(db,"stock"),{ name, qty, price });
+
+itemName.value="";
+itemQty.value="";
+itemPrice.value="";
 };
+
 
 // 🔹 REALTIME STOCK DISPLAY
 onSnapshot(collection(db,"stock"),(snapshot)=>{
 stockList.innerHTML="";
 orderItem.innerHTML="";
+
 snapshot.forEach(d=>{
 let data = d.data();
+
 stockList.innerHTML += `
 <div class="card">
 <strong>${data.name}</strong><br>
 Qty: ${data.qty}<br>
 Price: RM ${data.price}
 </div>`;
-orderItem.innerHTML += `<option value="${d.id}|${data.name}|${data.price}">${data.name}</option>`;
+
+orderItem.innerHTML += `
+<option value="${d.id}|${data.name}|${data.price}">
+${data.name}
+</option>`;
 });
 });
+
 
 // 🔹 ADD TO CART
 window.addToCart = function(){
@@ -122,24 +135,29 @@ let id = selected[0];
 let name = selected[1];
 let price = parseFloat(selected[2]);
 let qty = parseInt(orderQty.value);
+
 if(isNaN(qty)) return alert("Enter quantity");
 
 cartItems.push({id,name,price,qty});
 renderCart();
+orderQty.value="";
 };
 
 function renderCart(){
 cart.innerHTML="";
 let total=0;
+
 cartItems.forEach((item,index)=>{
 let itemTotal = item.price * item.qty;
 total += itemTotal;
+
 cart.innerHTML += `
 <div class="card">
 ${item.name} | Qty: ${item.qty} | RM ${itemTotal}
 <button class="delete-btn small-btn" onclick="removeCart(${index})">X</button>
 </div>`;
 });
+
 cart.innerHTML += `<strong>Total: RM ${total}</strong>`;
 }
 
@@ -148,7 +166,8 @@ cartItems.splice(index,1);
 renderCart();
 };
 
-// 🔹 SUBMIT ORDER (TRANSACTION SAFE)
+
+// 🔹 SUBMIT ORDER (FIXED TRANSACTION)
 window.submitOrder = async function(){
 
 let customerName = customer.value.trim();
@@ -162,6 +181,7 @@ await runTransaction(db, async (transaction)=>{
 let total = 0;
 
 for(let item of cartItems){
+
 let stockRef = doc(db,"stock",item.id);
 let stockDoc = await transaction.get(stockRef);
 
@@ -179,7 +199,10 @@ qty: stockData.qty - item.qty
 total += item.price * item.qty;
 }
 
-await addDoc(collection(db,"orders"),{
+// ✅ Proper order creation inside transaction
+const newOrderRef = doc(collection(db,"orders"));
+
+transaction.set(newOrderRef,{
 customer: customerName,
 items: cartItems,
 total,
@@ -191,24 +214,28 @@ date: new Date()
 
 cartItems = [];
 renderCart();
+customer.value="";
 alert("Order Submitted");
 };
 
-// 🔹 REALTIME ORDERS
+
+// 🔹 REALTIME ORDERS + REVENUE
 onSnapshot(collection(db,"orders"),(snapshot)=>{
 orderList.innerHTML="";
 let totalRevenue=0;
 
 snapshot.forEach(d=>{
 let data = d.data();
-if(data.payment==="Paid") totalRevenue+=data.total;
+
+if(data.payment==="Paid")
+totalRevenue += data.total;
 
 let itemList="";
 data.items.forEach(i=>{
-itemList+=`${i.name} (x${i.qty})<br>`;
+itemList += `${i.name} (x${i.qty})<br>`;
 });
 
-orderList.innerHTML+=`
+orderList.innerHTML += `
 <div class="card">
 <strong>${data.customer}</strong><br>
 ${itemList}
@@ -222,27 +249,25 @@ Status: ${data.payment}<br>
 totalRevenue.innerHTML="RM "+totalRevenue.toFixed(2);
 });
 
+
 // 🔹 TOGGLE PAYMENT
 window.togglePayment = async function(id,status){
 let newStatus = status==="Paid"?"Unpaid":"Paid";
 await updateDoc(doc(db,"orders",id),{ payment:newStatus });
 };
 
+
 // 🔹 DELETE ORDER + RESTORE STOCK
 window.deleteOrder = async function(id){
 
-let orderDoc = await getDocs(query(collection(db,"orders")));
-let target;
+let orderRef = doc(db,"orders",id);
 
-orderDoc.forEach(d=>{
-if(d.id===id) target=d;
-});
+await runTransaction(db, async (transaction)=>{
 
-if(!target) return;
+let orderDoc = await transaction.get(orderRef);
+if(!orderDoc.exists()) return;
 
-let data = target.data();
-
-await runTransaction(db, async(transaction)=>{
+let data = orderDoc.data();
 
 for(let item of data.items){
 let stockRef = doc(db,"stock",item.id);
@@ -254,7 +279,7 @@ qty: stockData.qty + item.qty
 });
 }
 
-transaction.delete(doc(db,"orders",id));
+transaction.delete(orderRef);
 
 });
 
