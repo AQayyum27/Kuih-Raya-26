@@ -211,56 +211,51 @@ return;
 
 try {
 
-await runTransaction(db, async (transaction)=>{
+await runTransaction(db, async (transaction) => {
 
-let total = 0;
+  // 1️⃣ READ EVERYTHING FIRST
+  const stockSnapshots = [];
 
-for(let item of cartItems){
+  for (const item of cart) {
+    const stockRef = doc(db, "stock", item.id);
+    const snap = await transaction.get(stockRef);
 
-let stockRef = doc(db,"stock",item.id);
-let stockDoc = await transaction.get(stockRef);
+    if (!snap.exists()) {
+      throw "Item not found";
+    }
 
-if(!stockDoc.exists()){
-throw new Error("Item not found");
-}
+    stockSnapshots.push({
+      ref: stockRef,
+      data: snap.data(),
+      orderQty: item.qty
+    });
+  }
 
-let stockData = stockDoc.data();
+  // 2️⃣ VALIDATE STOCK
+  for (const s of stockSnapshots) {
+    if (s.data.quantity < s.orderQty) {
+      throw "Not enough stock for " + s.data.name;
+    }
+  }
 
-if(stockData.qty < item.qty){
-throw new Error("Not enough stock for " + item.name);
-}
+  // 3️⃣ WRITE STOCK UPDATES
+  for (const s of stockSnapshots) {
+    transaction.update(s.ref, {
+      quantity: s.data.quantity - s.orderQty
+    });
+  }
 
-transaction.update(stockRef,{
-qty: stockData.qty - item.qty
+  // 4️⃣ WRITE ORDER
+  const orderRef = doc(collection(db, "orders"));
+  transaction.set(orderRef, {
+    customer: customerName,
+    items: cart,
+    total: totalPrice,
+    paid: false,
+    createdAt: serverTimestamp()
+  });
+
 });
-
-total += item.price * item.qty;
-}
-
-const newOrderRef = doc(collection(db,"orders"));
-
-transaction.set(newOrderRef,{
-customer: customerName,
-items: cartItems,
-total,
-payment: paymentStatus,
-date: new Date()
-});
-
-});
-
-cartItems=[];
-renderCart();
-customer.value="";
-alert("Order Submitted");
-
-} catch(error){
-alert(error.message);
-console.error(error);
-}
-
-};
-
 /* ---------------- REALTIME ORDERS ---------------- */
 
 onSnapshot(collection(db,"orders"), snapshot => {
@@ -342,3 +337,4 @@ alert(error.message);
 </script>
 </body>
 </html>
+
