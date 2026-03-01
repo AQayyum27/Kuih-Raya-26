@@ -1,35 +1,37 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Personal Ordering System PRO</title>
+<title>Personal Ordering System</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-body { font-family: Arial; max-width:650px; margin:auto; padding:15px;}
+body { font-family: Arial; max-width:700px; margin:auto; padding:15px;}
 input, select, button { width:100%; padding:10px; margin:5px 0;}
-button { background:#2c7be5; color:white; border:none; border-radius:5px;}
+button { background:#2c7be5; color:white; border:none; border-radius:5px; cursor:pointer;}
+button:hover { opacity:0.9; }
 .card { border:1px solid #ddd; padding:10px; margin-bottom:10px; border-radius:6px;}
 .hidden { display:none;}
 .flex { display:flex; gap:5px;}
 .small-btn { width:auto; padding:5px 10px; margin-top:5px; background:#28a745;}
 .delete-btn { background:#dc3545;}
+.tab-btn { flex:1; }
 </style>
 </head>
 <body>
 
-<h2>Personal Ordering System PRO</h2>
+<h2>Personal Ordering System</h2>
 
 <div class="flex">
-<button onclick="showTab('stock')">Stock</button>
-<button onclick="showTab('orders')">Orders</button>
+<button class="tab-btn" id="stockTabBtn">Stock</button>
+<button class="tab-btn" id="ordersTabBtn">Orders</button>
 </div>
 
-<div id="stock">
+<div id="stockSection">
 
 <h3>Add Stock</h3>
 <input id="itemName" placeholder="Item Name">
 <input type="number" id="itemQty" placeholder="Quantity">
 <input type="number" id="itemPrice" placeholder="Price (RM)">
-<button onclick="addStock()">Save Stock</button>
+<button id="saveStockBtn">Save Stock</button>
 
 <h3>Current Stock</h3>
 <div id="stockList"></div>
@@ -38,7 +40,7 @@ button { background:#2c7be5; color:white; border:none; border-radius:5px;}
 <input id="customer" placeholder="Customer Name">
 <select id="orderItem"></select>
 <input type="number" id="orderQty" placeholder="Quantity">
-<button onclick="addToCart()">Add Item</button>
+<button id="addCartBtn">Add To Cart</button>
 
 <div id="cart"></div>
 
@@ -47,24 +49,30 @@ button { background:#2c7be5; color:white; border:none; border-radius:5px;}
 <option>Unpaid</option>
 </select>
 
-<button onclick="submitOrder()">Submit Order</button>
+<button id="submitOrderBtn">Submit Order</button>
 
 </div>
 
-<div id="orders" class="hidden">
+<div id="ordersSection" class="hidden">
 <h3>Orders</h3>
 <div id="orderList"></div>
 
 <h3>Total Paid Revenue</h3>
-<div id="totalRevenue"></div>
+<div id="totalRevenue">RM 0.00</div>
 </div>
 
 <script type="module">
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { 
-getFirestore, collection, addDoc, doc, updateDoc, 
-onSnapshot, deleteDoc, runTransaction 
+import {
+getFirestore,
+collection,
+addDoc,
+doc,
+updateDoc,
+deleteDoc,
+onSnapshot,
+runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -81,37 +89,52 @@ const db = getFirestore(app);
 
 let cartItems = [];
 
-function showTab(tab){
-document.getElementById("stock").classList.add("hidden");
-document.getElementById("orders").classList.add("hidden");
-document.getElementById(tab).classList.remove("hidden");
-}
-window.showTab = showTab;
+/* ---------------- TABS ---------------- */
 
+document.getElementById("stockTabBtn").onclick = () => {
+document.getElementById("stockSection").classList.remove("hidden");
+document.getElementById("ordersSection").classList.add("hidden");
+};
 
-// 🔹 ADD STOCK
-window.addStock = async function(){
+document.getElementById("ordersTabBtn").onclick = () => {
+document.getElementById("ordersSection").classList.remove("hidden");
+document.getElementById("stockSection").classList.add("hidden");
+};
+
+/* ---------------- ADD STOCK ---------------- */
+
+document.getElementById("saveStockBtn").onclick = async () => {
+
 let name = itemName.value.trim();
 let qty = parseInt(itemQty.value);
 let price = parseFloat(itemPrice.value);
 
-if(!name || isNaN(qty) || isNaN(price)) return alert("Fill all");
+if(!name || isNaN(qty) || isNaN(price)){
+alert("Fill all fields");
+return;
+}
 
+try {
 await addDoc(collection(db,"stock"),{ name, qty, price });
-
 itemName.value="";
 itemQty.value="";
 itemPrice.value="";
+alert("Stock saved");
+} catch(error){
+alert(error.message);
+}
 };
 
+/* ---------------- REALTIME STOCK ---------------- */
 
-// 🔹 REALTIME STOCK DISPLAY
-onSnapshot(collection(db,"stock"),(snapshot)=>{
+onSnapshot(collection(db,"stock"), snapshot => {
+
 stockList.innerHTML="";
 orderItem.innerHTML="";
 
-snapshot.forEach(d=>{
-let data = d.data();
+snapshot.forEach(docSnap => {
+
+let data = docSnap.data();
 
 stockList.innerHTML += `
 <div class="card">
@@ -121,29 +144,37 @@ Price: RM ${data.price}
 </div>`;
 
 orderItem.innerHTML += `
-<option value="${d.id}|${data.name}|${data.price}">
+<option value="${docSnap.id}|${data.name}|${data.price}">
 ${data.name}
 </option>`;
 });
+
 });
 
+/* ---------------- CART ---------------- */
 
-// 🔹 ADD TO CART
-window.addToCart = function(){
+document.getElementById("addCartBtn").onclick = () => {
+
 let selected = orderItem.value.split("|");
+if(selected.length < 3) return;
+
 let id = selected[0];
 let name = selected[1];
 let price = parseFloat(selected[2]);
 let qty = parseInt(orderQty.value);
 
-if(isNaN(qty)) return alert("Enter quantity");
+if(isNaN(qty) || qty <= 0){
+alert("Enter valid quantity");
+return;
+}
 
 cartItems.push({id,name,price,qty});
-renderCart();
 orderQty.value="";
+renderCart();
 };
 
 function renderCart(){
+
 cart.innerHTML="";
 let total=0;
 
@@ -158,7 +189,7 @@ ${item.name} | Qty: ${item.qty} | RM ${itemTotal}
 </div>`;
 });
 
-cart.innerHTML += `<strong>Total: RM ${total}</strong>`;
+cart.innerHTML += `<strong>Total: RM ${total.toFixed(2)}</strong>`;
 }
 
 window.removeCart = function(index){
@@ -166,14 +197,14 @@ cartItems.splice(index,1);
 renderCart();
 };
 
+/* ---------------- SUBMIT ORDER ---------------- */
 
-// 🔹 SUBMIT ORDER (FIXED TRANSACTION)
-window.submitOrder = async function(){
+document.getElementById("submitOrderBtn").onclick = async () => {
 
 let customerName = customer.value.trim();
 let paymentStatus = payment.value;
 
-if(!customerName || cartItems.length===0){
+if(!customerName || cartItems.length === 0){
 alert("Add items first");
 return;
 }
@@ -206,9 +237,6 @@ qty: stockData.qty - item.qty
 total += item.price * item.qty;
 }
 
-};
-  
-// ✅ Proper order creation inside transaction
 const newOrderRef = doc(collection(db,"orders"));
 
 transaction.set(newOrderRef,{
@@ -221,60 +249,67 @@ date: new Date()
 
 });
 
-cartItems = [];
+cartItems=[];
 renderCart();
 customer.value="";
-alert("Order Submitted Successfully");
+alert("Order Submitted");
 
 } catch(error){
-alert("Error: " + error.message);
+alert(error.message);
 console.error(error);
 }
 
 };
 
-// 🔹 REALTIME ORDERS + REVENUE
-onSnapshot(collection(db,"orders"),(snapshot)=>{
+/* ---------------- REALTIME ORDERS ---------------- */
+
+onSnapshot(collection(db,"orders"), snapshot => {
+
 orderList.innerHTML="";
-let totalRevenue=0;
+let revenue=0;
 
-snapshot.forEach(d=>{
-let data = d.data();
+snapshot.forEach(docSnap => {
 
-if(data.payment==="Paid")
-totalRevenue += data.total;
+let data = docSnap.data();
 
-let itemList="";
+if(data.payment === "Paid"){
+revenue += data.total;
+}
+
+let itemsHTML="";
 data.items.forEach(i=>{
-itemList += `${i.name} (x${i.qty})<br>`;
+itemsHTML += `${i.name} (x${i.qty})<br>`;
 });
 
 orderList.innerHTML += `
 <div class="card">
 <strong>${data.customer}</strong><br>
-${itemList}
+${itemsHTML}
 Total: RM ${data.total}<br>
 Status: ${data.payment}<br>
-<button class="small-btn" onclick="togglePayment('${d.id}','${data.payment}')">Toggle Payment</button>
-<button class="delete-btn small-btn" onclick="deleteOrder('${d.id}')">Delete</button>
+<button class="small-btn" onclick="togglePayment('${docSnap.id}','${data.payment}')">Toggle Payment</button>
+<button class="delete-btn small-btn" onclick="deleteOrder('${docSnap.id}')">Delete</button>
 </div>`;
 });
 
-totalRevenue.innerHTML="RM "+totalRevenue.toFixed(2);
+totalRevenue.innerHTML = "RM " + revenue.toFixed(2);
+
 });
 
+/* ---------------- TOGGLE PAYMENT ---------------- */
 
-// 🔹 TOGGLE PAYMENT
-window.togglePayment = async function(id,status){
-let newStatus = status==="Paid"?"Unpaid":"Paid";
+window.togglePayment = async (id,status)=>{
+let newStatus = status==="Paid" ? "Unpaid" : "Paid";
 await updateDoc(doc(db,"orders",id),{ payment:newStatus });
 };
 
+/* ---------------- DELETE ORDER ---------------- */
 
-// 🔹 DELETE ORDER + RESTORE STOCK
-window.deleteOrder = async function(id){
+window.deleteOrder = async (id)=>{
 
 let orderRef = doc(db,"orders",id);
+
+try {
 
 await runTransaction(db, async (transaction)=>{
 
@@ -286,6 +321,7 @@ let data = orderDoc.data();
 for(let item of data.items){
 let stockRef = doc(db,"stock",item.id);
 let stockDoc = await transaction.get(stockRef);
+
 let stockData = stockDoc.data();
 
 transaction.update(stockRef,{
@@ -297,9 +333,12 @@ transaction.delete(orderRef);
 
 });
 
+} catch(error){
+alert(error.message);
+}
+
 };
 
 </script>
 </body>
 </html>
-
